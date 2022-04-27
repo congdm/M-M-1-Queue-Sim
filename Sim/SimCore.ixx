@@ -48,7 +48,7 @@ namespace SimCore {
 
 	class Packet {
 	public:
-		int id;
+		int id, genId;
 		double creationTime, totalServTime, totalQueueTime;
 	};
 	
@@ -61,6 +61,7 @@ namespace SimCore {
 
 	class GenNode : public Node {
 	private:
+		int id;
 		double lambda;
 		double rand[RANDOM_ARRAY_SIZE];
 		unsigned int ridx;
@@ -69,7 +70,7 @@ namespace SimCore {
 
 		double getInverval();
 	public:
-		GenNode(Sim* sim, double lambda);
+		GenNode(Sim* sim, double lambda, int id);
 		void set_output(Node* out);
 		void generate();
 		double getTime();
@@ -109,6 +110,7 @@ namespace SimCore {
 		int nDrop;
 		double avgTime;
 		double* servTimeData, * queueTimeData;
+		int* pktOriginData;
 		bool* droppedPktData;
 		int dataCnt;
 		int gid;
@@ -158,15 +160,15 @@ namespace SimCore {
 	void EventList::heapify(int x) {
 		int left, right;
 		left = x * 2 + 1; right = x * 2 + 2;
-		if (left < n && events[left].t < events[x].t) {
-			Event temp;
-			temp = events[x]; events[x] = events[left]; events[left] = temp;
-			heapify(left);
-		}
-		else if (right < n && events[right].t < events[x].t) {
+		if (right < n && events[right].t < events[x].t && events[right].t < events[left].t) {
 			Event temp;
 			temp = events[x]; events[x] = events[right]; events[right] = temp;
 			heapify(right);
+		}
+		else if (left < n && events[left].t < events[x].t) {
+			Event temp;
+			temp = events[x]; events[x] = events[left]; events[left] = temp;
+			heapify(left);
 		}
 	}
 	
@@ -212,11 +214,12 @@ namespace SimCore {
 	/* ----------------------------------------------------------------------------- */
 	/* Misc */
 
-	void updatePacketLog(Sim* sim, Packet* pkt) {
+	void updatePacketLog(Sim* sim, Packet* pkt, double t) {
 		int pktId = pkt->id;
 		if (pktId < sim->dataCnt) {
 			sim->servTimeData[pktId] = pkt->totalServTime;
 			sim->queueTimeData[pktId] = pkt->totalQueueTime;
+			sim->pktOriginData[pktId] = pkt->genId;
 		}
 	}
 
@@ -224,7 +227,7 @@ namespace SimCore {
 		int pktId = pkt->id;
 		if (pktId < sim->dataCnt) {
 			sim->droppedPktData[pktId] = true;
-			updatePacketLog(sim, pkt);
+			updatePacketLog(sim, pkt, t);
 		}
 		delete pkt;
 		sim->nDrop++;
@@ -243,7 +246,8 @@ namespace SimCore {
 		return interval;
 	}
 
-	GenNode::GenNode(Sim* sim,  double lambda) {
+	GenNode::GenNode(Sim* sim,  double lambda, int id) {
+		this->id = id;
 		this->lambda = lambda;
 		this->sim = sim;
 		MathMod::gen_exponential(this->rand, lambda, RANDOM_ARRAY_SIZE);
@@ -262,10 +266,12 @@ namespace SimCore {
 
 		if (this->lambda > 0.0) {
 			interval = this->getInverval();
+			assert(interval >= 0);
 			this->t = this->t + interval;
 
 			pkt = new Packet();
 			pkt->id = sim->gid;
+			pkt->genId = this->id;
 			sim->gid++;
 			pkt->creationTime = t;
 			pkt->totalQueueTime = 0;
@@ -291,8 +297,8 @@ namespace SimCore {
 	void SinkNode::handle(Message msg, double t, Packet* pkt) {
 		assert(msg == arrive);
 		/* do something */
-		updatePacketLog(sim, pkt);
-		printf("Packet %d: created at %.4f arrived to sink at %.4f\n", pkt->id, pkt->creationTime, t);
+		updatePacketLog(sim, pkt, t);
+		//printf("Packet %d: created at %.4f arrived to sink at %.4f\n", pkt->id, pkt->creationTime, t);
 		delete pkt;
 	}
 
@@ -300,7 +306,7 @@ namespace SimCore {
 	/* Functions of BasicNode class */
 
 	double BasicNode::getServiceTime() {
-		if (this->ridx >= std::size(this->rand)) {
+		if (this->ridx >= RANDOM_ARRAY_SIZE) {
 			MathMod::gen_exponential(this->rand, this->mu, RANDOM_ARRAY_SIZE);
 			this->ridx = 0;
 		}
@@ -394,19 +400,24 @@ namespace SimCore {
 	/* POSTCONDITION: this procedure ensures all possible packets
 	   before and at threshold time have been generated */
 	void Sim::generateUntil(double threshold) {
-		while (genMinT <= threshold) {
-			for (int i = 0; i < nGen; i++) {
+		int i;
+		double min = 0, max = 0;
+		double t;
+
+		for (i = 0; i < nGen; i++) {
+			while (gen[i]->getTime() <= threshold) {
 				gen[i]->generate();
-				double t = gen[i]->getTime();
-				if (i > 0) {
-					if (t < genMinT) genMinT = t;
-					else if (t > genMaxT) genMaxT = t;
-				}
-				else {
-					genMinT = t; genMaxT = t;
-				}
 			}
 		}
+		
+		min = gen[0]->getTime(); max = min;
+		for (i = 1; i < nGen; i++) {
+			t = gen[i]->getTime();
+			if (t < min) min = t;
+			else if (t > max) max = t;
+		}
+		assert(min > genMinT); genMinT = min;
+		assert(max >= genMaxT); genMaxT = max;
 	}
 
 	void Sim::resetStateVars(int limit)
@@ -418,6 +429,7 @@ namespace SimCore {
 		servTimeData = new double[limit];
 		queueTimeData = new double[limit];
 		droppedPktData = new bool[limit](); /* zero initialized */
+		pktOriginData = new int[limit];
 
 		gid = 0;
 		genMinT = 0;
@@ -433,7 +445,7 @@ namespace SimCore {
 		nGen = n; nNode = n;
 		sink = new SinkNode(this);
 		for (i = n-1; i >= 0; i--) {
-			gen[i] = new GenNode(this, lambda[i]);
+			gen[i] = new GenNode(this, lambda[i], i);
 			node[i] = new BasicNode(this, mu[i], queueLen[i]);
 			gen[i]->set_output(node[i]);
 			if (i == n - 1) node[i]->set_output(sink);
@@ -452,9 +464,8 @@ namespace SimCore {
 				ev.receiver->handle(ev.action, ev.t, ev.pkt);
 			else {
 				evList.put(ev);
-				double threshold = std::max(genMaxT, ev.t);
-				generateUntil(threshold);
-				
+				double threshold = ev.t;
+				generateUntil(threshold);	
 			}
 		} while (gid < limit);
 

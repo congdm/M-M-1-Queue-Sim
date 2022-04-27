@@ -32,6 +32,13 @@ void outputData(SimCore::Sim& sim) {
         else out << "false";
         if (i < sim.dataCnt - 1) out << ", ";
     }
+    out << "],\n";
+
+    out << "\"pktOriginData\": [";
+    for (int i = 0; i < sim.dataCnt; i++) {
+        out << sim.pktOriginData[i];
+        if (i < sim.dataCnt - 1) out << ", ";
+    }
     out << "]\n";
 
     out << "}\n";
@@ -42,12 +49,12 @@ void outputData(SimCore::Sim& sim) {
 int main()
 {
     SimCore::Sim sim;
-    double lambda[] = { 1.0 };
-    double mu[] = { 2.0 };
-    int queueLen[] = { 100 };
+    double lambda[] = { 1.0, 1.5 };
+    double mu[] = { 2.0, 4.0 };
+    int queueLen[] = { 10000, 10000 };
 
-    sim.init(1, lambda, mu, queueLen);
-    sim.runSim(1000);
+    sim.init(2, lambda, mu, queueLen);
+    sim.runSim(10000);
     outputData(sim);
     sim.cleanUp();
 }

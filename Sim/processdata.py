@@ -10,7 +10,11 @@ servTimeData = np.array(data["servTimeData"])
 queueTimeData = np.array(data["queueTimeData"])
 droppedPktFlag = data["droppedPktData"]
 
-plt.plot(servTimeData + queueTimeData)
+y = servTimeData + queueTimeData
+print("Mean service time %.4f\n", np.mean(servTimeData))
+print("Mean response time %.4f\n", np.mean(y))
+
+plt.plot(y)
 plt.ylabel('Total time in system')
 plt.xlabel('Packet')
 plt.show()
