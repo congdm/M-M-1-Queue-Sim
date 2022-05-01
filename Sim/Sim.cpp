@@ -144,14 +144,55 @@ void Worker::waitTillDone() {
 
 int main()
 {
-    Worker wk1(100, 10000);
+    int cnt = 100;
+    Worker wk1(cnt, 10000);
     wk1.waitTillDone();
 
-    for (int i = 0; i < 100; i++) {
-        std::cout << wk1.data[i].lambda[0] << " " << wk1.data[i].mu[0] << " ";
-        std::cout << wk1.data[i].lambda[1] << " " << wk1.data[i].mu[1] << " ";
-        std::cout << wk1.data[i].meanServTime << " " << wk1.data[i].meanTimeInSys << "\n";
+    std::ofstream out;
+    out.open("data.json");
+    out << "{\n\"cnt\": " << cnt << ",\n";
+
+    out << "\"lambda0\": [";
+    for (int i = 0; i < cnt; i++) {
+        out << wk1.data[i].lambda[0];
+        if (i < cnt - 1) out << ", ";
     }
+    out << "],\n";
+    out << "\"mu0\": [";
+    for (int i = 0; i < cnt; i++) {
+        out << wk1.data[i].mu[0];
+        if (i < cnt - 1) out << ", ";
+    }
+    out << "],\n";
+
+    out << "\"lambda1\": [";
+    for (int i = 0; i < cnt; i++) {
+        out << wk1.data[i].lambda[1];
+        if (i < cnt - 1) out << ", ";
+    }
+    out << "],\n";
+    out << "\"mu1\": [";
+    for (int i = 0; i < cnt; i++) {
+        out << wk1.data[i].mu[1];
+        if (i < cnt - 1) out << ", ";
+    }
+    out << "],\n";
+
+    out << "\"meanServTime\": [";
+    for (int i = 0; i < cnt; i++) {
+        out << wk1.data[i].meanServTime;
+        if (i < cnt - 1) out << ", ";
+    }
+    out << "],\n";
+    out << "\"meanTimeInSys\": [";
+    for (int i = 0; i < cnt; i++) {
+        out << wk1.data[i].meanTimeInSys;
+        if (i < cnt - 1) out << ", ";
+    }
+    out << "]\n";
+
+    out << "}\n";
+    out.close();
 
     return 0;
 }
