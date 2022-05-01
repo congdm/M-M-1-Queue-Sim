@@ -3,9 +3,13 @@
 
 #include <iostream>
 #include <fstream>
+#include <random>
+#include <time.h>
+#include <thread>
 
 import SimCore;
 
+/*
 void outputData(SimCore::Sim& sim) {
     std::ofstream out;
     out.open("output.json");
@@ -46,8 +50,7 @@ void outputData(SimCore::Sim& sim) {
     out.close();
 }
 
-int main()
-{
+void testRun() {
     SimCore::Sim sim;
     double lambda[] = { 1.0, 1.5 };
     double mu[] = { 2.0, 4.0 };
@@ -57,6 +60,100 @@ int main()
     sim.runSim(10000);
     outputData(sim);
     sim.cleanUp();
+}
+*/
+
+class DataPoint {
+public:
+    double lambda[2];
+    double mu[2];
+    double meanServTime, meanTimeInSys;
+};
+
+class Worker {
+    int nDataPoint, nRound;
+    std::thread* threadObj;
+    void run();
+public:
+    DataPoint* data;
+
+    Worker(int nDataPoint, int nRound);
+    void waitTillDone();
+};
+
+void Worker::run() {
+    std::mt19937* generator;
+    std::hash<std::thread::id> hasher;
+    time_t now = time(nullptr);
+    unsigned int seed = now + hasher(std::this_thread::get_id());
+    generator = new std::mt19937(seed);
+    std::uniform_real_distribution<> distLambda(0.0, 8.0);
+    std::uniform_real_distribution<> distMu(0.0, 10.0);
+
+    int i;
+    data = new DataPoint[nDataPoint];
+    for (i = 0; i < nDataPoint; i++) {
+        data[i].lambda[0] = distLambda(*generator);
+        double mu = 0.0;
+        while (mu < data[i].lambda[0])
+            mu = distMu(*generator);
+        data[i].mu[0] = mu;
+
+        data[i].lambda[1] = distLambda(*generator);
+        mu = 0.0;
+        while (mu < data[i].lambda[0] + data[i].lambda[1])
+            mu = distMu(*generator) + distMu(*generator);
+        data[i].mu[1] = mu;
+    }
+
+    SimCore::Sim sim;
+    double lambda[2], mu[2];
+    int queueLen[] = { nRound, nRound };
+    double servTime, timeInSys;
+    for (i = 0; i < nDataPoint; i++) {
+        lambda[0] = data[i].lambda[0];
+        lambda[1] = data[i].lambda[1];
+        mu[0] = data[i].mu[0];
+        mu[1] = data[i].mu[1];
+
+        sim.init(2, lambda, mu, queueLen);
+        sim.runSim(nRound);
+
+        servTime = 0.0;
+        timeInSys = 0.0;
+        for (int j = 0; j < sim.dataCnt; j++) {
+            servTime = servTime + sim.servTimeData[j];
+            timeInSys = timeInSys + sim.servTimeData[j] + sim.queueTimeData[j];
+        }
+        data[i].meanServTime = servTime / sim.dataCnt;
+        data[i].meanTimeInSys = timeInSys / sim.dataCnt;
+
+        sim.cleanUp();
+    }
+}
+
+Worker::Worker(int nDataPoint, int nRound) {
+    this->nDataPoint = nDataPoint;
+    this->nRound = nRound;
+    threadObj = new std::thread(&Worker::run, this);
+}
+
+void Worker::waitTillDone() {
+    threadObj->join();
+}
+
+int main()
+{
+    Worker wk1(100, 10000);
+    wk1.waitTillDone();
+
+    for (int i = 0; i < 100; i++) {
+        std::cout << wk1.data[i].lambda[0] << " " << wk1.data[i].mu[0] << " ";
+        std::cout << wk1.data[i].lambda[1] << " " << wk1.data[i].mu[1] << " ";
+        std::cout << wk1.data[i].meanServTime << " " << wk1.data[i].meanTimeInSys << "\n";
+    }
+
+    return 0;
 }
 
 // Run program: Ctrl + F5 or Debug > Start Without Debugging menu
