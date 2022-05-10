@@ -3,11 +3,13 @@
 
 #include <iostream>
 #include <fstream>
-#include <random>
 #include <time.h>
 #include <thread>
+#include <string>
+#include <intrin.h>
 
 import SimCore;
+import RNG;
 
 /*
 void outputData(SimCore::Sim& sim) {
@@ -65,63 +67,127 @@ void testRun() {
 
 class DataPoint {
 public:
-    double lambda[2];
-    double mu[2];
+    double lambda[8];
+    double mu[8];
     double meanServTime, meanTimeInSys;
 };
 
 class Worker {
-    int nDataPoint, nRound;
+    int nDataPoint, nNode, nPacket;
     std::thread* threadObj;
     void run();
 public:
     DataPoint* data;
+    int id;
 
-    Worker(int nDataPoint, int nRound);
+    Worker(int id, int nDataPoint, int nNode, int nPacket);
+    void writeToFile(time_t startTime);
     void waitTillDone();
 };
 
-void Worker::run() {
-    std::mt19937* generator;
-    std::hash<std::thread::id> hasher;
-    time_t now = time(nullptr);
-    unsigned int seed = now + hasher(std::this_thread::get_id());
-    generator = new std::mt19937(seed);
-    std::uniform_real_distribution<> distLambda(0.0, 8.0);
-    std::uniform_real_distribution<> distMu(0.0, 10.0);
+void Worker::writeToFile(time_t startTime) {
+    std::string filename;
+    std::ofstream out;
+    int i, j;
 
-    int i;
+    filename = "data_";
+    filename.append(std::to_string(startTime));
+    if (RNG::mode == RNG::MersenneTwister) filename.append("_mersennetwister");
+    else if (RNG::mode == RNG::cpuRDRAND) filename.append("_rdrand");
+    filename.append("_p"); filename.append(std::to_string(nPacket));
+    filename.append("_n"); filename.append(std::to_string(nNode));
+    filename.append("_w"); filename.append(std::to_string(id));
+    filename.append(".json");
+
+    out.open(filename);
+    out << "{\n\"nData\": " << nDataPoint << ",\n";
+    out << "\"nNode\": " << nNode << ",\n";
+
+    for (i = 0; i < nNode; i++) {
+        out << "\"lambda" << i << "\": [";
+        for (j = 0; j < nDataPoint; j++) {
+            out << data[j].lambda[i];
+            if (j < nDataPoint-1) out << ", ";
+        }
+        out << "],\n";
+
+        out << "\"mu" << i << "\": [";
+        for (j = 0; j < nDataPoint; j++) {
+            out << data[j].mu[i];
+            if (j < nDataPoint-1) out << ", ";
+        }
+        out << "],\n";
+    }
+
+    out << "\"meanServTime\": [";
+    for (i = 0; i < nDataPoint; i++) {
+        out << data[i].meanServTime;
+        if (i < nDataPoint-1) out << ", ";
+    }
+    out << "],\n";
+    out << "\"meanTimeInSys\": [";
+    for (int i = 0; i < nDataPoint; i++) {
+        out << data[i].meanTimeInSys;
+        if (i < nDataPoint-1) out << ", ";
+    }
+    out << "]\n";
+    out << "}\n";
+    out.close();
+}
+
+unsigned __int64 generateUniform(unsigned __int64 limit) {
+    unsigned __int64 result;
+    _rdrand64_step(&result);
+    return (result % limit);
+}
+
+unsigned __int64 generateIrwinHall(unsigned __int64 limitUni, int n) {
+    if (n <= 1) return generateUniform(limitUni);
+    else return generateUniform(limitUni) + generateIrwinHall(limitUni, n - 1);
+}
+
+void Worker::run() {
+    int i, j;
+    double* lambda, * mu, sumLambda;
+    int* queueLen;
+    std::string msg;
+    
+    msg = "Worker "; msg = msg.append(std::to_string(id)); msg.append(" starts\n");
+    std::cout << msg;
+
+    lambda = new double[nNode]; mu = new double[nNode];
     data = new DataPoint[nDataPoint];
     for (i = 0; i < nDataPoint; i++) {
-        data[i].lambda[0] = distLambda(*generator);
-        double mu = 0.0;
-        while (mu < data[i].lambda[0])
-            mu = distMu(*generator);
-        data[i].mu[0] = mu;
-
-        data[i].lambda[1] = distLambda(*generator);
-        mu = 0.0;
-        while (mu < data[i].lambda[0] + data[i].lambda[1])
-            mu = distMu(*generator) + distMu(*generator);
-        data[i].mu[1] = mu;
+        sumLambda = 0.0;
+        for (j = 0; j < nNode; j++) {
+            do lambda[j] = generateUniform(16384);
+            while (lambda[j] == 0.0);
+            do mu[j] = generateIrwinHall(16384*2, j+1);
+            while (mu[j] <= sumLambda + lambda[j]);
+            sumLambda = sumLambda + lambda[j];
+            data[i].lambda[j] = lambda[j] / 16384.0 * 16.0;
+            data[i].mu[j] = mu[j] / 16384.0 * 16.0;
+        }
     }
 
     SimCore::Sim sim;
-    double lambda[2], mu[2];
-    int queueLen[] = { nRound, nRound };
+    queueLen = new int[nNode];
+    std::fill_n(queueLen, nNode, nPacket);
     double servTime, timeInSys;
-    for (i = 0; i < nDataPoint; i++) {
-        lambda[0] = data[i].lambda[0];
-        lambda[1] = data[i].lambda[1];
-        mu[0] = data[i].mu[0];
-        mu[1] = data[i].mu[1];
 
-        sim.init(2, lambda, mu, queueLen);
-        sim.runSim(nRound);
+    for (i = 0; i < nDataPoint; i++) {
+        if (i % 1000 == 0) {
+            msg = "Worker "; msg = msg.append(std::to_string(id));
+            msg.append(" begins iteration "); msg = msg.append(std::to_string(i)); msg.append("\n");
+            std::cout << msg;
+        }
+
+        sim.init(nNode, data[i].lambda, data[i].mu, queueLen);
+        sim.runSim(nPacket);
 
         servTime = 0.0;
         timeInSys = 0.0;
-        for (int j = 0; j < sim.dataCnt; j++) {
+        for (j = 0; j < sim.dataCnt; j++) {
             servTime = servTime + sim.servTimeData[j];
             timeInSys = timeInSys + sim.servTimeData[j] + sim.queueTimeData[j];
         }
@@ -130,11 +196,15 @@ void Worker::run() {
 
         sim.cleanUp();
     }
+
+    delete lambda; delete mu; delete queueLen;
 }
 
-Worker::Worker(int nDataPoint, int nRound) {
+Worker::Worker(int id, int nDataPoint, int nNode, int nPacket) {
+    this->id = id;
     this->nDataPoint = nDataPoint;
-    this->nRound = nRound;
+    this->nNode = nNode;
+    this->nPacket = nPacket;
     threadObj = new std::thread(&Worker::run, this);
 }
 
@@ -144,55 +214,52 @@ void Worker::waitTillDone() {
 
 int main()
 {
-    int cnt = 100;
-    Worker wk1(cnt, 10000);
-    wk1.waitTillDone();
+    int nWorker = 1;
+    int nData = 10000;
+    int nNode = 1;
+    int nPacket = 100000;
+    time_t startTime, endTime;
+    std::string str;
 
-    std::ofstream out;
-    out.open("data.json");
-    out << "{\n\"cnt\": " << cnt << ",\n";
+    int i;
+    Worker** worker;
 
-    out << "\"lambda0\": [";
-    for (int i = 0; i < cnt; i++) {
-        out << wk1.data[i].lambda[0];
-        if (i < cnt - 1) out << ", ";
+    std::cout << "List of PRNG:\n";
+    std::cout << "1. C++ Standard Library Mersenne Twister\n";
+    std::cout << "2. RDRAND instruction\n";
+    std::cout << "Choose: ";
+    std::cin >> str;
+    if (str.compare("2") == 0) {
+        RNG::mode = RNG::cpuRDRAND;
+        std::cout << "PRNG is set to RDRAND\n";
     }
-    out << "],\n";
-    out << "\"mu0\": [";
-    for (int i = 0; i < cnt; i++) {
-        out << wk1.data[i].mu[0];
-        if (i < cnt - 1) out << ", ";
+    else {
+        std::cout << "PRNG is set to Mersenne Twister\n";
     }
-    out << "],\n";
 
-    out << "\"lambda1\": [";
-    for (int i = 0; i < cnt; i++) {
-        out << wk1.data[i].lambda[1];
-        if (i < cnt - 1) out << ", ";
-    }
-    out << "],\n";
-    out << "\"mu1\": [";
-    for (int i = 0; i < cnt; i++) {
-        out << wk1.data[i].mu[1];
-        if (i < cnt - 1) out << ", ";
-    }
-    out << "],\n";
+    std::cout << "Number of workers: ";
+    std::cin >> nWorker;
+    std::cout << "Number of simulations each worker: ";
+    std::cin >> nData;
+    std::cout << "Number of nodes each simulation: ";
+    std::cin >> nNode;
+    std::cout << "Number of packets each simulation: ";
+    std::cin >> nPacket;
 
-    out << "\"meanServTime\": [";
-    for (int i = 0; i < cnt; i++) {
-        out << wk1.data[i].meanServTime;
-        if (i < cnt - 1) out << ", ";
+    std::time(&startTime);
+    worker = new Worker * [nWorker];
+    for (i = 0; i < nWorker; i++) {
+        worker[i] = new Worker(i, nData, nNode, nPacket);
     }
-    out << "],\n";
-    out << "\"meanTimeInSys\": [";
-    for (int i = 0; i < cnt; i++) {
-        out << wk1.data[i].meanTimeInSys;
-        if (i < cnt - 1) out << ", ";
+    for (i = 0; i < nWorker; i++) {
+        worker[i]->waitTillDone();
     }
-    out << "]\n";
+    std::time(&endTime);
+    std::cout << "Running time: " << endTime - startTime << " seconds";
 
-    out << "}\n";
-    out.close();
+    for (i = 0; i < nWorker; i++) {
+        worker[i]->writeToFile(startTime);
+    }
 
     return 0;
 }

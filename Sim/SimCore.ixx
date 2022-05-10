@@ -3,7 +3,7 @@
 #include <algorithm>
 
 export module SimCore;
-import MathMod;
+import RNG;
 
 namespace SimCore {
 	void assert(bool cond) {
@@ -14,7 +14,7 @@ namespace SimCore {
 	/* ----------------------------------------------------------------------------- */
 	/* Type definitions */
 
-	#define RANDOM_ARRAY_SIZE 131072
+	#define RANDOM_ARRAY_SIZE 10000
 
 	class Sim;
 	class Node;
@@ -62,9 +62,12 @@ namespace SimCore {
 	class GenNode : public Node {
 	private:
 		int id;
+
+		RNG::Generator rng;
 		double lambda;
 		double rand[RANDOM_ARRAY_SIZE];
 		unsigned int ridx;
+
 		double t;
 		Node* outNode;
 
@@ -84,9 +87,11 @@ namespace SimCore {
 
 	class BasicNode : public Node {
 	private:
+		RNG::Generator rng;
 		double mu;
 		double rand[RANDOM_ARRAY_SIZE];
 		unsigned int ridx;
+
 		double t;
 		std::queue<Packet*> queue;
 		int queueLen, nInQueue;
@@ -238,7 +243,7 @@ namespace SimCore {
 
 	double GenNode::getInverval() {
 		if (this->ridx >= RANDOM_ARRAY_SIZE) {
-			MathMod::gen_exponential(this->rand, this->lambda, RANDOM_ARRAY_SIZE);
+			this->rng.generateExponential(this->rand, this->lambda, RANDOM_ARRAY_SIZE);
 			this->ridx = 0;
 		}
 		double interval = this->rand[this->ridx];
@@ -250,7 +255,7 @@ namespace SimCore {
 		this->id = id;
 		this->lambda = lambda;
 		this->sim = sim;
-		MathMod::gen_exponential(this->rand, lambda, RANDOM_ARRAY_SIZE);
+		this->rng.generateExponential(this->rand, lambda, RANDOM_ARRAY_SIZE);
 		this->ridx = 0;
 		this->t = 0;
 	}
@@ -307,7 +312,7 @@ namespace SimCore {
 
 	double BasicNode::getServiceTime() {
 		if (this->ridx >= RANDOM_ARRAY_SIZE) {
-			MathMod::gen_exponential(this->rand, this->mu, RANDOM_ARRAY_SIZE);
+			this->rng.generateExponential(this->rand, this->mu, RANDOM_ARRAY_SIZE);
 			this->ridx = 0;
 		}
 		double servTime = this->rand[this->ridx];
@@ -318,7 +323,7 @@ namespace SimCore {
 	BasicNode::BasicNode(Sim* sim, double mu, int queueLen) {
 		this->mu = mu;
 		this->sim = sim;
-		MathMod::gen_exponential(this->rand, mu, RANDOM_ARRAY_SIZE);
+		this->rng.generateExponential(this->rand, mu, RANDOM_ARRAY_SIZE);
 		this->ridx = 0;
 		this->t = 0;
 		this->queueLen = queueLen;
@@ -425,7 +430,7 @@ namespace SimCore {
 		nDrop = 0;
 		avgTime = 0;
 		dataCnt = limit;
-		delete servTimeData; delete queueTimeData; delete droppedPktData;
+		delete servTimeData; delete queueTimeData; delete droppedPktData; delete pktOriginData;
 		servTimeData = new double[limit];
 		queueTimeData = new double[limit];
 		droppedPktData = new bool[limit](); /* zero initialized */

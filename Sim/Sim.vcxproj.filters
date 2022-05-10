@@ -18,11 +18,14 @@
     <ClCompile Include="Sim.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="MathMod.ixx">
+    <ClCompile Include="RNG.ixx">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="SimCore.ixx">
       <Filter>Source Files</Filter>
     </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="verifyData.py" />
   </ItemGroup>
 </Project>
